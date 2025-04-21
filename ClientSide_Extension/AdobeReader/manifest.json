@@ -1,28 +1,29 @@
 {
-  "manifest_version": 2,
-
+  "manifest_version": 3,
   "name": "Adobe Reader",
-  "description": " Extension of PDF Docs Integration ",
+  "description": "Extension of PDF Docs Integration",
   "version": "1.0",
-
   "icons": {
     "48": "Adobe.png"
   },
-
   "permissions": [
-    "tabs", "<all_urls>"
+    "tabs",
+    "storage"
   ],
-
-  "browser_action": {
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "action": {
     "default_icon": "Adobe.png",
     "default_popup": ""
   },
-
-   "content_scripts": [ {
-        "all_frames": true,
-        "js": [ "code/refresh.js" ],
-        "matches": [ "http://*/*","https://*/*"],
-		"run_at": "document_end"
-    } ]
-  
+  "content_scripts": [
+    {
+      "js": ["code/refresh.js"],
+      "matches": ["http://*/*", "https://*/*"],
+      "run_at": "document_end",
+      "all_frames": true
+    }
+  ]
 }
