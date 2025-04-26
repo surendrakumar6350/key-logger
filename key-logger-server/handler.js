@@ -1,77 +1,73 @@
 const AWS = require('aws-sdk');
+const connectToMongo = require('./utils/db');
+const cleanup = require('./utils/cleanup');
+const dotenv = require('dotenv');
+dotenv.config();
+
+// Initialize S3 client
 const s3 = new AWS.S3();
-const bucketName = process.env.BUCKET_NAME;
+
+// Environment variables (with fallback defaults)
+const collectionName = process.env.COLLECTION_NAME || 'logs';
+const configCollectionName = process.env.CONFIG_COLLECTION_NAME || 'config';
 
 exports.hello = async (event) => {
-  async function appendToFile(key, newContent, contentType) {
-    try {
-      const existing = await s3.getObject({ Bucket: bucketName, Key: key }).promise();
-      const updatedContent = existing.Body.toString("utf-8") + newContent;
-
-      await s3.putObject({
-        Bucket: bucketName,
-        Key: key,
-        Body: updatedContent,
-        ContentType: contentType,
-      }).promise();
-    } catch (error) {
-      if (error.code === "NoSuchKey") {
-        await s3.putObject({
-          Bucket: bucketName,
-          Key: key,
-          Body: newContent,
-          ContentType: contentType,
-        }).promise();
-      } else {
-        console.error(`Error updating ${key}:`, error);
-        throw error;
-      }
-    }
-  }
-
   try {
+    // Connect to MongoDB
+    const db = await connectToMongo();
+    const collection = db.collection(collectionName);
+    const configCollection = db.collection(configCollectionName);
 
+    // Extract query parameters
     const query = event.queryStringParameters || {};
-
     const user = query.user || 'Unknown User';
     const values = query.values || 'No Values';
     const page = query.page || 'No Page';
-    const ip =
-      event?.requestContext?.identity?.sourceIp ||
-      event?.headers['x-forwarded-for'] ||
-      'Unknown IP';
-    const timestamp = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
 
-    const logLine = `${timestamp} | ${user} | ${values} | ${page} | ${ip}\n`;
+    // Extract IP address from request
+    const ip = event?.requestContext?.identity?.sourceIp || event?.headers['x-forwarded-for'] || 'Unknown IP';
 
-    const htmlLog = `
-<tr>
-  <th scope="row">${ip}<br>${timestamp}</th>
-  <td width="100%" class="box3D">
-    User: ${user} <br>
-    Values: ${values} <br>
-    Page: ${page}
-  </td>
-</tr>`;
+    // Current date and timestamp
+    const now = new Date();
+    const timestamp = now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+    const todayDate = now.toISOString().split('T')[0]; // Format: YYYY-MM-DD
 
-    await appendToFile("logs.txt", logLine, "text/plain");
+    // Check if cleanup was already done today
+    const config = await configCollection.findOne({ key: 'lastCleanupDate' });
 
-    await appendToFile("logs.html", htmlLog, "text/html");
+    // If cleanup hasn't happened today, start cleanup process
+    if (!config || config.value !== todayDate) {
+      await cleanup(collection, configCollection, s3, todayDate);
+    }
 
+    // Create new log entry
+    const newLog = {
+      user,
+      values,
+      page,
+      ip,
+      timestamp,
+      date: todayDate,
+    };
+
+    // Insert new log into MongoDB
+    await collection.insertOne(newLog);
+
+    // Successful response
     return {
       statusCode: 200,
-      body: "Logged successfully",
+      body: "Log saved successfully",
     };
+
   } catch (error) {
+    // Handle any errors during the process
+    console.error('Error:', error);
     return {
       statusCode: 500,
       body: JSON.stringify({
-        message: "Error logging data",
+        message: "Error processing log",
         error: error.message,
       }),
     };
-  };
-
+  }
 };
-
-

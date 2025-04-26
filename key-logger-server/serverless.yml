@@ -18,6 +18,7 @@ provider:
 functions:
   hello:
     handler: handler.hello
+    timeout: 30
     events:
       - httpApi:
           path: /
