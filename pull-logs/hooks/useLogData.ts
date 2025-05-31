@@ -6,7 +6,7 @@ import { LogEntry, LogResponse } from '@/types';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
 
-export function useLogData(refreshInterval = 6000) {
+export function useLogData(refreshInterval = 10000) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [filteredLogs, setFilteredLogs] = useState<LogEntry[]>([]);
   const [selectedLog, setSelectedLog] = useState<LogEntry | null>(null);
@@ -27,6 +27,10 @@ export function useLogData(refreshInterval = 6000) {
       }
     } catch (err) {
       console.error('Failed to fetch logs:', err);
+      if (axios.isAxiosError(err) && err.response?.status === 401) {
+        window.location.href = '/verify';
+        return;
+      }
       setError('Failed to fetch logs. Please try again later.');
     } finally {
       setIsLoading(false);
@@ -44,11 +48,11 @@ export function useLogData(refreshInterval = 6000) {
 
   useEffect(() => {
     fetchLogs();
-    
+
     const intervalId = setInterval(() => {
       fetchLogs();
     }, refreshInterval);
-    
+
     return () => clearInterval(intervalId);
   }, [fetchLogs, refreshInterval]);
 
