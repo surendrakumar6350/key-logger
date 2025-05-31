@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request): Promise<NextResponse> {
     try {
         await connectDb();
-        const recentLogs = await Log.find().sort({ _id: -1 }).limit(20).lean();
+        const recentLogs = await Log.find().sort({ _id: -1 }).limit(40).lean();
 
         return NextResponse.json({
             success: true,
