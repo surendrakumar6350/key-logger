@@ -17,10 +17,15 @@ export async function GET(request: Request): Promise<NextResponse> {
                 message: "Unauthorized",
             }, { status: 401 });
         }
-
-        const token = tokenCookie.value;
-        jwt.verify(token, process.env.JWT_SECRET!);
-
+        try {
+            const token = tokenCookie.value;
+            jwt.verify(token, process.env.JWT_SECRET!);
+        } catch (error) {
+            return NextResponse.json({
+                success: false,
+                message: "Unauthorized",
+            }, { status: 401 })
+        }
 
         await connectDb();
         const recentLogs = await Log.find().sort({ _id: -1 }).limit(50).lean();
