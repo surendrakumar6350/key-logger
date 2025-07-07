@@ -1,0 +1,75 @@
+name: Deploy to EC2
+
+on:
+  push:
+  pull_request:
+
+jobs:     
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: |
+          cd pull-logs
+          npm install
+
+      - name: Create .env file
+        run: |
+          echo "DB=${{ secrets.DB }}" >> pull-logs/.env
+          echo "JWT_SECRET=${{ secrets.JWT_SECRET }}" >> pull-logs/.env
+          echo "NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}" >> pull-logs/.env
+          echo "USERNAME_US=${{ secrets.USERNAME_US }}" >> pull-logs/.env
+          echo "PASSWORD=${{ secrets.PASSWORD }}" >> pull-logs/.env
+
+      - name: Build project
+        run: cd pull-logs && npm run build 
+
+      - name: Archive production build
+        run: |
+          tar -czf build.tar.gz \
+            pull-logs/.next \
+            pull-logs/public \
+            pull-logs/package.json \
+            pull-logs/tsconfig.json \
+            pull-logs/.env \
+            pull-logs/next.config.ts \
+            pull-logs/node_modules
+        
+      - name: Setup SSH key
+        run: |
+          echo "${{ secrets.EC2_PEM_KEY }}" > key.pem
+          chmod 400 key.pem
+
+      - name: Copy build to EC2
+        run: |
+          scp -i key.pem -o StrictHostKeyChecking=no build.tar.gz ubuntu@${{ secrets.S_IP }}:/home/ubuntu/
+
+
+      - name: SSH into EC2 and deploy
+        run: |
+          ssh -i key.pem -o StrictHostKeyChecking=no -tt ubuntu@${{ secrets.S_IP }} << 'EOF'
+            rm -rf key-logger
+            mkdir key-logger
+            tar -xzf build.tar.gz -C key-logger
+            rm -r build.tar.gz
+            cd key-logger/pull-logs
+            
+            pm2 delete key-logger || true
+            PORT=8081 pm2 start npm --name "key-logger" -- run start
+            echo "✅ deployed successfully"
+            exit 0
+          EOF
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f key.pem
