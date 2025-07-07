@@ -65,7 +65,7 @@ jobs:
             cd key-logger/pull-logs
             
             pm2 delete key-logger || true
-            PORT=8081 pm2 start npm --name "key-logger" -- run start
+            PORT=8082 pm2 start npm --name "key-logger" -- run start
             echo "✅ deployed successfully"
             exit 0
           EOF
