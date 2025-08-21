@@ -17,6 +17,7 @@ async function verifyToken(token: string) {
 
 export async function middleware(request: NextRequest) {
     const { method, url, headers } = request;
+    const path = request.nextUrl.pathname;
 
     const ip =
         headers.get("cf-connecting-ip") || // Cloudflare
@@ -38,17 +39,17 @@ export async function middleware(request: NextRequest) {
 
 
     let authCookie = request.cookies.get('token');
-    if (request.nextUrl.pathname.startsWith('/')) {
+    if (path === "/") {
         const isValid = authCookie && await verifyToken(authCookie.value);
         if (!isValid) {
-            return NextResponse.rewrite(new URL('/verify', request.url));
+            return NextResponse.redirect(new URL('/verify', request.url));
         }
     }
 
-    if (request.nextUrl.pathname.startsWith('/verify')) {
+    if (path === "/verify") {
         const isValid = authCookie && await verifyToken(authCookie.value);
         if (isValid) {
-            return NextResponse.rewrite(new URL('/', request.url));
+            return NextResponse.redirect(new URL('/', request.url));
         }
     }
 }
