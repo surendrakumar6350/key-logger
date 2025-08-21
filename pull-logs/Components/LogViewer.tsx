@@ -39,10 +39,7 @@ export default function LogViewer() {
   return (
     <div className="h-screen flex flex-col md:flex-row">
       {/* Main content area */}
-      <div className="w-full md:w-2/3 p-6 overflow-y-auto order-2 md:order-1 min-h-[50vh] md:min-h-0">
-        <h1 className="text-2xl font-bold text-white mb-2">Log Viewer</h1>
-        <p className="text-gray-400 mb-6">Real-time activity logs</p>
-        
+     <div className="w-full md:w-2/3 p-6 overflow-y-auto order-2 md:order-1 min-h-[50vh] md:min-h-0 bg-gray-950"> 
         {error && (
           <div className="bg-red-900/50 border border-red-700 p-4 rounded-lg mb-6 text-red-200">
             {error}

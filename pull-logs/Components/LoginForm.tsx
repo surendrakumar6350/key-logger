@@ -17,7 +17,6 @@ import {
   FormMessage,
 } from '@/Components/ui/form';
 import { Input } from '@/Components/ui/input';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/Components/ui/card';
 import { Alert, AlertDescription } from '@/Components/ui/alert';
 import { LoginCredentials } from '@/types/auth';
 
@@ -57,13 +56,17 @@ export default function LoginForm() {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || 'Login failed. Please check your credentials and try again.');
+        throw new Error(
+          errorData.message ||
+          'Login failed. Please check your credentials and try again.'
+        );
       }
 
-      // Successfully logged in, redirect to home page
       router.push('/');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An unexpected error occurred');
+      setError(
+        err instanceof Error ? err.message : 'An unexpected error occurred'
+      );
       console.error('Login error:', err);
     } finally {
       setIsLoading(false);
@@ -71,81 +74,81 @@ export default function LoginForm() {
   };
 
   return (
-    <Card className="w-full max-w-md mx-auto">
-      <CardHeader>
-        <CardTitle className="text-2xl font-bold">Login</CardTitle>
-        <CardDescription>
-          Enter your credentials to access your account
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-            {error && (
-              <Alert variant="default" className="mb-4">
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
+    <div className="space-y-4">
+      {error && (
+        <Alert className="border-red-500/50 bg-red-500/10">
+          <AlertDescription className="text-red-400">
+            {error}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          {/* Username */}
+          <FormField
+            control={form.control}
+            name="username"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel className="text-sm font-medium text-gray-300">
+                  Username
+                </FormLabel>
+                <FormControl>
+                  <Input
+                    placeholder="Enter your username"
+                    {...field}
+                    autoComplete="username"
+                    disabled={isLoading}
+                    className="h-10 bg-gray-800 border-gray-700 text-white placeholder-gray-500 focus:border-blue-500 focus:ring focus:ring-blue-500/20"
+                  />
+                </FormControl>
+                <FormMessage className="text-red-400 text-sm" />
+              </FormItem>
             )}
+          />
 
-            <FormField
-              control={form.control}
-              name="username"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Username</FormLabel>
-                  <FormControl>
-                    <Input
-                      placeholder="Enter your username"
-                      {...field}
-                      autoComplete="username"
-                      disabled={isLoading}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+          {/* Password */}
+          <FormField
+            control={form.control}
+            name="password"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel className="text-sm font-medium text-gray-300">
+                  Password
+                </FormLabel>
+                <FormControl>
+                  <Input
+                    type="password"
+                    placeholder="Enter your password"
+                    {...field}
+                    autoComplete="current-password"
+                    disabled={isLoading}
+                    className="h-10 bg-gray-800 border-gray-700 text-white placeholder-gray-500 focus:border-blue-500 focus:ring focus:ring-blue-500/20"
+                  />
+                </FormControl>
+                <FormMessage className="text-red-400 text-sm" />
+              </FormItem>
+            )}
+          />
 
-            <FormField
-              control={form.control}
-              name="password"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Password</FormLabel>
-                  <FormControl>
-                    <Input
-                      type="password"
-                      placeholder="••••••••"
-                      {...field}
-                      autoComplete="current-password"
-                      disabled={isLoading}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <Button
-              type="submit"
-              className="w-full mt-6"
-              disabled={isLoading}
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Logging in...
-                </>
-              ) : (
-                'Sign in'
-              )}
-            </Button>
-          </form>
-        </Form>
-      </CardContent>
-      <CardFooter className="flex justify-center text-sm text-muted-foreground">
-        Protected by secure authentication
-      </CardFooter>
-    </Card>
+          {/* Submit button */}
+          <Button
+            type="submit"
+            className="w-full h-10 mt-6 cursor-pointer bg-blue-600 hover:bg-blue-700 text-white"
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Signing in...
+              </>
+            ) : (
+              'Log In'
+            )}
+          </Button>
+        </form>
+      </Form>
+    </div>
   );
 }
