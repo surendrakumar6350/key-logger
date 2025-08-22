@@ -37,13 +37,24 @@ export function useLogData(refreshInterval = 10000) {
         }
         setError(null);
       }
-    } catch (err) {
-      console.error('Failed to fetch logs:', err);
-      if (axios.isAxiosError(err) && err.response?.status === 401) {
-        window.location.href = '/verify';
-        return;
+      else {
+        if (response.status === 401) {
+          setError('Session expired. Refreshing page in 5 seconds...');
+          setTimeout(() => {
+            window.location.reload();
+          }, 5000);
+        } else {
+          setError(response.data.message || 'Failed to fetch logs. Please try again later.');
+          setTimeout(() => {
+            setError(null);
+          }, 5000);
+        }
       }
+    } catch (err) {
       setError('Failed to fetch logs. Please try again later.');
+      setTimeout(() => {
+        setError(null);
+      }, 5000);
     } finally {
       setIsLoading(false);
     }
