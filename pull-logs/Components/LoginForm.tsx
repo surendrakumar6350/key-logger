@@ -43,7 +43,7 @@ export default function LoginForm() {
       setIsLoading(true);
       setError(null);
 
-      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL}/token`;
+      const apiUrl = `/api/token`;
 
       const response = await fetch(apiUrl, {
         method: 'POST',
