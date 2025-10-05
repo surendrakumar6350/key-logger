@@ -24,7 +24,7 @@ const LogCards: React.FC<LogCardsProps> = ({ logs }) => {
       ) : (
         logs.map((log) => (
           <div 
-            key={log._id} 
+            key={log._id || `${log.timestamp}-${log.ip}`} 
             className="bg-white rounded-xl p-5 shadow-md border-l-4 border-gray-200 transition duration-200 hover:shadow-lg hover:-translate-y-1"
           >
             <div className="flex justify-between items-start mb-4">

@@ -1,0 +1,349 @@
+import { connectDb } from "@/dbConnection/connect";
+import { Log } from "@/dbConnection/Schema/logSchema";
+import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
+import jwt from "jsonwebtoken";
+import { z } from "zod";
+import { configureS3, listS3Objects, searchLogsInS3File } from "@/lib/s3-utils";
+
+export const dynamic = "force-dynamic";
+
+// TYPES
+// ===============================
+
+// Search result structure
+interface SearchResults {
+  databaseResults: any[];
+  s3Results: any[];
+}
+
+// Authentication error
+class AuthError extends Error {
+  constructor(message: string = "Authentication failed") {
+    super(message);
+    this.name = "AuthError";
+  }
+}
+
+// Search parameters
+interface SearchParams {
+  query: string;
+  limit: number;
+}
+
+// Result counts
+interface ResultCounts {
+  database: number;
+  s3: number;
+  total: number;
+}
+
+// VALIDATION
+// ===============================
+
+// Validate search parameters
+const searchSchema = z.object({
+  query: z.string().min(1).max(200),
+  limit: z
+    .string()
+    .regex(/^\d+$/)
+    .transform(Number)
+    .default("50")
+    .transform((val) => Math.min(Math.max(val, 1), 100)), // min 1, max 100
+});
+
+// AUTHENTICATION
+// ===============================
+
+/**
+ * Authenticate the request using JWT token
+ * @throws {AuthError} If authentication fails
+ */
+async function authenticateRequest(): Promise<void> {
+  const cookieStore = await cookies();
+  const tokenCookie = cookieStore.get('token');
+
+  if (!tokenCookie?.value) {
+    throw new AuthError("Unauthorized");
+  }
+
+  try {
+    jwt.verify(tokenCookie.value, process.env.JWT_SECRET!);
+  } catch (error) {
+    throw new AuthError("Unauthorized");
+  }
+}
+
+// PARAMETER VALIDATION
+// ===============================
+
+/**
+ * Validate and parse search parameters
+ * @param url Request URL containing search parameters
+ * @returns Validated search parameters
+ */
+function validateSearchParams(url: URL): SearchParams {
+  const result = searchSchema.safeParse({
+    query: url.searchParams.get("query") ?? "",
+    limit: url.searchParams.get("limit") ?? "50",
+  });
+
+  if (!result.success) {
+    throw new Error("Invalid query params");
+  }
+
+  return result.data;
+}
+
+// MONGODB OPERATIONS
+// ===============================
+
+/**
+ * Search for logs in MongoDB
+ * @param query The search query
+ * @param limit Maximum number of results to return
+ * @returns Array of matching logs
+ */
+async function searchMongoDB(query: string, limit: number): Promise<any[]> {
+  try {
+    await connectDb();
+    const results = await Log.find({
+      $or: [
+        { user: { $regex: query, $options: 'i' } },
+        { values: { $regex: query, $options: 'i' } },
+        { page: { $regex: query, $options: 'i' } },
+        { ip: { $regex: query, $options: 'i' } }
+      ]
+    })
+      .limit(limit)
+      .lean();
+    
+    return results;
+  } catch (error) {
+    console.error("MongoDB search error:", error);
+    return [];
+  }
+}
+
+// S3 OPERATIONS
+// ===============================
+
+/**
+ * Process a single S3 file and search for matching logs
+ * @param bucketName S3 bucket name
+ * @param fileKey S3 file key
+ * @param query Search query
+ * @param remainingLimit How many more results we need
+ * @returns Array of matching logs from this file
+ */
+async function processSingleS3File(
+  bucketName: string,
+  fileKey: string,
+  query: string,
+  remainingLimit: number
+): Promise<any[]> {
+  if (!fileKey.match(/\.(html|txt)$/)) {
+    return [];
+  }
+
+  try {
+    // Extract date from filename (logs/YYYY-MM-DD.html or logs/YYYY-MM-DD.txt)
+    const dateMatch = fileKey.match(/logs\/(\d{4}-\d{2}-\d{2})\.(html|txt)$/);
+    const dateStr = dateMatch ? dateMatch[1] : '';
+
+    // Use memory-efficient search function
+    const matchedLogs = await searchLogsInS3File(
+      bucketName,
+      fileKey,
+      query,
+      dateStr,
+      remainingLimit
+    );
+
+    // Add file metadata to matched logs
+    return matchedLogs.map(log => ({
+      ...log,
+      source: 's3',
+      s3File: fileKey
+    }));
+  } catch (fileError: any) {
+    // Skip this file if there's an error, but continue with others
+    if (fileError.code !== 'NoSuchKey' && fileError.statusCode !== 404) {
+      console.error(`Error processing ${fileKey}:`, fileError);
+    }
+    return [];
+  }
+}
+
+/**
+ * Search for logs in S3 files in batches
+ * @param query The search query
+ * @param limit Maximum number of results to return
+ * @returns Array of matching logs
+ */
+async function searchS3Files(
+  query: string, 
+  limit: number
+): Promise<any[]> {
+  try {
+    const bucketName = process.env.S3_BUCKET_NAME;
+    if (!bucketName) {
+      throw new Error('S3_BUCKET_NAME environment variable is not defined');
+    }
+
+    const results: any[] = [];
+    let isTruncated = true;
+    let nextToken: string | undefined = undefined;
+
+    // Using pagination to process S3 files in batches to avoid memory overload
+    while (isTruncated && results.length < limit) {
+      // List S3 objects with pagination
+      const { files, isTruncated: isMoreFiles, nextToken: token } =
+        await listS3Objects('logs/', 100, nextToken);
+
+      if (files.length === 0) {
+        break;
+      }
+
+      nextToken = token;
+
+      // Process each file one by one to avoid loading everything into memory
+      for (const file of files) {
+        // If we've reached our limit, stop processing more files
+        if (results.length >= limit) {
+          break;
+        }
+
+        if (!file.Key) continue;
+
+        const fileResults = await processSingleS3File(
+          bucketName,
+          file.Key,
+          query,
+          limit - results.length
+        );
+
+        results.push(...fileResults);
+      }
+
+      // Update the pagination status for next batch
+      isTruncated = isMoreFiles;
+    }
+
+    return results;
+  } catch (s3Error) {
+    console.error("S3 search error:", s3Error);
+    return [];
+  }
+}
+
+// RESULT PROCESSING
+// ===============================
+
+/**
+ * Combine and sort results from multiple sources
+ * @param results SearchResults object containing results from different sources
+ * @param limit Maximum number of results to return
+ * @returns Combined, sorted and limited array of results
+ */
+function combineAndSortResults(
+  results: SearchResults, 
+  limit: number
+): { finalResults: any[], counts: ResultCounts } {
+  // Add source information to database results
+  const databaseResults = results.databaseResults.map(log => ({ 
+    ...log, 
+    source: 'database' 
+  }));
+  
+  // Combine results
+  const combinedResults = [...databaseResults, ...results.s3Results];
+
+  // Sort by timestamp desc (most recent first)
+  combinedResults.sort((a, b) => {
+    // Handle various date formats - use timestamps as strings for sorting
+    const timeA = a.timestamp || '';
+    const timeB = b.timestamp || '';
+    return timeB.localeCompare(timeA);
+  });
+
+  // Final results limited to requested amount
+  const finalResults = combinedResults.slice(0, limit);
+
+  // Calculate counts
+  const counts = {
+    database: results.databaseResults.length,
+    s3: results.s3Results.length,
+    total: finalResults.length,
+  };
+
+  return { finalResults, counts };
+}
+
+// MAIN HANDLER
+// ===============================
+
+export async function GET(request: Request): Promise<NextResponse> {
+  const startTime = Date.now();
+  
+  try {
+    // Step 1: Authenticate the request
+    try {
+      await authenticateRequest();
+    } catch (error) {
+      if (error instanceof AuthError) {
+        return NextResponse.json({
+          success: false,
+          message: error.message,
+        }, { status: 401 });
+      }
+      throw error; // Re-throw unexpected errors
+    }
+
+    // Step 2: Validate search parameters
+    let params: SearchParams;
+    try {
+      params = validateSearchParams(new URL(request.url));
+    } catch (error) {
+      return NextResponse.json({
+        success: false,
+        message: "Invalid query params",
+        errors: error instanceof Error ? error.message : String(error),
+      }, { status: 400 });
+    }
+
+    const { query, limit } = params;
+    
+    // Step 3: Search in MongoDB (today's logs)
+    const databaseResults = await searchMongoDB(query, limit);
+    
+    // Step 4: Search in S3 (historical logs)
+    const s3Results = await searchS3Files(query, limit);
+    
+    // Step 5: Combine and process results
+    const { finalResults, counts } = combineAndSortResults(
+      { databaseResults, s3Results },
+      limit
+    );
+
+    // Step 6: Return successful response
+    return NextResponse.json({
+      success: true,
+      message: "Search completed successfully",
+      query,
+      timeMs: Date.now() - startTime,
+      data: finalResults,
+      counts
+    }, { status: 200 });
+
+  } catch (error) {
+    console.error("Search API error:", error);
+    
+    // Return error response
+    return NextResponse.json({
+      success: false,
+      message: "Server Error",
+      error: error instanceof Error ? error.message : String(error)
+    }, { status: 500 });
+  }
+}

@@ -4,9 +4,17 @@ import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { LogEntry } from '@/types';
 
-export function useLogData({ page: initialPage = 1, limit: initialLimit = 50, refreshInterval = 10000 }) {
+export function useLogData({ 
+  page: initialPage = 1, 
+  limit: initialLimit = 50, 
+  date: initialDate = '', 
+  refreshInterval = 10000 
+}) {
+  const today = new Date().toISOString().split('T')[0];
   const [page, setPage] = useState(initialPage);
   const [limit, setLimit] = useState(initialLimit);
+  // Default to today's date on first load so backend clearly knows it's 'today'
+  const [date, setDate] = useState<string>(initialDate || today);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [filteredLogs, setFilteredLogs] = useState<LogEntry[]>([]);
   const [selectedLog, setSelectedLog] = useState<LogEntry | null>(null);
@@ -14,11 +22,13 @@ export function useLogData({ page: initialPage = 1, limit: initialLimit = 50, re
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pagination, setPagination] = useState<any>(null);
+  const [dataSource, setDataSource] = useState<'database' | 's3'>('database');
 
   const fetchLogs = useCallback(async () => {
     setIsLoading(true);
     try {
-      const response = await axios.get(`/api/log?page=${page}&limit=${limit}`, {
+      const dateParam = date ? `&date=${date}` : '';
+      const response = await axios.get(`/api/log?page=${page}&limit=${limit}${dateParam}`, {
         headers: { Accept: 'application/json' },
         validateStatus: () => true,
       });
@@ -33,6 +43,7 @@ export function useLogData({ page: initialPage = 1, limit: initialLimit = 50, re
       if (response.data.success) {
         setLogs(response.data.data);
         setPagination(response.data.pagination);
+        setDataSource(response.data.source || 'database');
         const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
 
         if (!isMobile && response.data.data.length > 0 && !selectedLog) {
@@ -54,7 +65,7 @@ export function useLogData({ page: initialPage = 1, limit: initialLimit = 50, re
     } finally {
       setIsLoading(false);
     }
-  }, [page, limit, selectedLog]);
+  }, [page, limit, date]);
 
   useEffect(() => {
     const filtered = logs.filter(log =>
@@ -65,11 +76,21 @@ export function useLogData({ page: initialPage = 1, limit: initialLimit = 50, re
     setFilteredLogs(filtered);
   }, [logs, searchQuery]);
 
+  // Reset pagination and selection when date filter changes
+  useEffect(() => {
+    setPage(1);
+    setSelectedLog(null);
+  }, [date]);
+
   useEffect(() => {
     fetchLogs();
-    const intervalId = setInterval(fetchLogs, refreshInterval);
-    return () => clearInterval(intervalId);
-  }, [fetchLogs, refreshInterval]);
+    // Auto-refresh only when looking at today's data
+    const isToday = date === today;
+    const intervalId = isToday ? setInterval(fetchLogs, refreshInterval) : null;
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [fetchLogs, refreshInterval, date, today]);
 
   return {
     logs,
@@ -86,5 +107,8 @@ export function useLogData({ page: initialPage = 1, limit: initialLimit = 50, re
     setPage,
     limit,
     setLimit,
+    date,
+    setDate,
+    dataSource,
   };
 }
