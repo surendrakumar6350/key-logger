@@ -31,8 +31,10 @@ export const listS3Objects = async (
   nextToken?: string
 }> => {
   const s3 = configureS3();
-  const bucketName = process.env.S3_BUCKET_NAME;
-  
+  const bucketName =
+    process.env.S3_BUCKET_NAME ??
+    process.env.BUCKET_NAME ??
+    process.env.AWS_S3_BUCKET_NAME;
   if (!bucketName) {
     throw new Error('S3_BUCKET_NAME environment variable is not defined');
   }
