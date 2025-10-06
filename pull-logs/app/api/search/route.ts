@@ -36,7 +36,10 @@ interface SearchParams {
   query: string;
   limit: number;
   page: number;
-  month?: string; // Format: YYYY-MM
+  fromDate?: string; // YYYY-MM-DD
+  toDate?: string;   // YYYY-MM-DD
+  user?: string;
+  source?: string; // 'database', 's3', or 'both'
 }
 
 // Result counts
@@ -52,23 +55,12 @@ interface ResultCounts {
 // Validate search parameters
 const searchSchema = z.object({
   query: z.string().min(1).max(200),
-  limit: z
-    .string()
-    .regex(/^\d+$/)
-    .transform(Number)
-    .default("100")
-    .transform((val) => Math.min(Math.max(val, 1), 100)), // Fixed limit of 100 per page
-  page: z
-    .string()
-    .regex(/^\d+$/)
-    .transform(Number)
-    .default("1")
-    .transform((val) => Math.max(val, 1)), // Min page 1
-  month: z
-    .string()
-    .regex(/^\d{4}-\d{2}$/)
-    .optional()
-    .transform((val) => val || undefined),
+  limit: z.string().regex(/^\d+$/).transform(Number).default("100").transform((val) => Math.min(Math.max(val, 1), 1000)),
+  page: z.string().regex(/^\d+$/).transform(Number).default("1").transform((val) => Math.max(val, 1)),
+  fromDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  toDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  user: z.string().optional(),
+  source: z.enum(["database", "s3", "both"]).optional(),
 });
 
 
@@ -112,13 +104,14 @@ function validateSearchParams(url: URL): SearchParams {
     query: url.searchParams.get("query") ?? "",
     limit: url.searchParams.get("limit") ?? "100",
     page: url.searchParams.get("page") ?? "1",
-    month: url.searchParams.get("month") ?? undefined,
+    fromDate: url.searchParams.get("fromDate") ?? undefined,
+    toDate: url.searchParams.get("toDate") ?? undefined,
+    user: url.searchParams.get("user") ?? undefined,
+    source: url.searchParams.get("source") ?? undefined,
   });
-
   if (!result.success) {
     throw new Error("Invalid query params");
   }
-
   return result.data;
 }
 
@@ -133,7 +126,7 @@ function validateSearchParams(url: URL): SearchParams {
  * @param month Optional month filter (YYYY-MM)
  * @returns Array of matching logs
  */
-async function searchMongoDB(query: string, limit: number, skip: number, month?: string): Promise<any[]> {
+async function searchMongoDB(query: string, limit: number, skip: number, fromDate?: string, toDate?: string, user?: string): Promise<any[]> {
   try {
     await connectDb();
     
@@ -146,26 +139,19 @@ async function searchMongoDB(query: string, limit: number, skip: number, month?:
         { ip: { $regex: query, $options: 'i' } }
       ]
     };
-    
-    // Add month filter if provided
-    if (month) {
-      // Create timestamp range for the given month
-      const [year, monthNum] = month.split('-').map(Number);
-      const startDate = new Date(year, monthNum - 1, 1); // Month is 0-indexed in JS Date
-      const endDate = new Date(year, monthNum, 0); // Last day of month
-      
-      searchCondition.timestamp = {
-        $gte: startDate.toISOString(),
-        $lte: endDate.toISOString()
-      };
+    if (fromDate || toDate) {
+      searchCondition.timestamp = {};
+      if (fromDate) searchCondition.timestamp.$gte = new Date(fromDate).toISOString();
+      if (toDate) searchCondition.timestamp.$lte = new Date(toDate).toISOString();
     }
-    
+    if (user) {
+      searchCondition.user = { $regex: user, $options: 'i' };
+    }
     const results = await Log.find(searchCondition)
       .sort({ timestamp: -1 })
       .skip(skip)
       .limit(limit)
       .lean();
-    
     return results;
   } catch (error) {
     console.error("MongoDB search error:", error);
@@ -188,7 +174,10 @@ async function processSingleS3File(
   bucketName: string,
   fileKey: string,
   query: string,
-  remainingLimit: number
+  remainingLimit: number,
+  fromDate?: string,
+  toDate?: string,
+  user?: string
 ): Promise<any[]> {
   // Only process HTML logs for better efficiency
   if (!fileKey.endsWith('.html')) {
@@ -208,13 +197,16 @@ async function processSingleS3File(
       dateStr,
       remainingLimit
     );
-
-    // Add file metadata to matched logs
-    return matchedLogs.map(log => ({
-      ...log,
-      source: 's3',
-      s3File: fileKey
-    }));
+    // Filter by date and user
+    const filtered = matchedLogs.filter(log => {
+      let dateOk = true;
+      if (fromDate && log.timestamp < fromDate) dateOk = false;
+      if (toDate && log.timestamp > toDate) dateOk = false;
+      let userOk = true;
+      if (user && log.user && !log.user.toLowerCase().includes(user.toLowerCase())) userOk = false;
+      return dateOk && userOk;
+    });
+    return filtered.map(log => ({ ...log, source: 's3', s3File: fileKey }));
   } catch (fileError: any) {
     // Skip this file if there's an error, but continue with others
     if (fileError.code !== 'NoSuchKey' && fileError.statusCode !== 404) {
@@ -234,7 +226,9 @@ async function processSingleS3File(
 async function searchS3Files(
   query: string, 
   limit: number,
-  month?: string
+  fromDate?: string,
+  toDate?: string,
+  user?: string
 ): Promise<any[]> {
   try {
     const bucketName = process.env.S3_BUCKET_NAME;
@@ -247,7 +241,7 @@ async function searchS3Files(
     let nextToken: string | undefined = undefined;
     
     // If month is specified, optimize search by filtering prefix
-    const prefix = month ? `logs/${month}` : 'logs/';
+  const prefix = 'logs/';
 
     // Using pagination to process S3 files in batches to avoid memory overload
     while (isTruncated && results.length < limit) {
@@ -279,20 +273,17 @@ async function searchS3Files(
         // Only consider HTML logs
         if (!file.Key.endsWith('.html')) continue;
         
-        // If month is specified, double check the file matches the month
-        if (month) {
-          const dateMatch = file.Key.match(/(\d{4}-\d{2})-\d{2}\.html$/);
-          const fileMonth = dateMatch?.[1];
-          if (fileMonth !== month) continue;
-        }
+        // Month filtering removed; date range is validated after parsing per-file logs
 
         const fileResults = await processSingleS3File(
           bucketName,
           file.Key,
           query,
-          limit - results.length
+          limit - results.length,
+          fromDate,
+          toDate,
+          user
         );
-
         results.push(...fileResults);
       }
 
@@ -303,6 +294,98 @@ async function searchS3Files(
     return results;
   } catch (s3Error) {
     console.error("S3 search error:", s3Error);
+    return [];
+  }
+}
+
+// MONTH-WIDE SEARCH (EXACT PAGINATION)
+// ===============================
+
+/**
+ * Fetch ALL matching MongoDB logs for a given month and query
+ */
+async function searchMongoDBAllForMonth(query: string, month: string): Promise<any[]> {
+  try {
+    await connectDb();
+
+    const [year, monthNumStr] = month.split('-');
+    const y = Number(year);
+    const m = Number(monthNumStr);
+    // Start at first day 00:00:00.000 and end at last ms of the month
+    const startDate = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0, 0));
+    const endDate = new Date(Date.UTC(y, m, 1, 0, 0, 0, 0) - 1); // last ms of the month
+
+    const searchCondition: any = {
+      $or: [
+        { user: { $regex: query, $options: 'i' } },
+        { values: { $regex: query, $options: 'i' } },
+        { page: { $regex: query, $options: 'i' } },
+        { ip: { $regex: query, $options: 'i' } },
+      ],
+      timestamp: {
+        $gte: startDate.toISOString(),
+        $lte: endDate.toISOString(),
+      },
+    };
+
+    const results = await Log.find(searchCondition)
+      .sort({ timestamp: -1 })
+      .lean();
+
+    return results;
+  } catch (err) {
+    console.error('Mongo month-wide search error:', err);
+    return [];
+  }
+}
+
+/**
+ * Fetch ALL matching S3 logs for a given month and query
+ */
+async function searchS3FilesAllForMonth(query: string, month: string): Promise<any[]> {
+  try {
+    const bucketName = process.env.S3_BUCKET_NAME;
+    if (!bucketName) throw new Error('S3_BUCKET_NAME environment variable is not defined');
+
+    const results: any[] = [];
+    let isTruncated = true;
+    let nextToken: string | undefined = undefined;
+    const prefix = `logs/${month}`; // e.g., logs/2025-07
+
+    // Iterate all listed files for that month
+    while (isTruncated) {
+      const { files, isTruncated: more, nextToken: token } = await listS3Objects(prefix, S3_LIST_PAGE_SIZE, nextToken);
+      nextToken = token;
+      isTruncated = more;
+
+      if (files.length === 0) continue;
+
+      // Sort desc by date embedded in key
+      files.sort((a, b) => {
+        const da = a.Key?.match(/(\d{4}-\d{2}-\d{2})/)?.[0] || '';
+        const db = b.Key?.match(/(\d{4}-\d{2}-\d{2})/)?.[0] || '';
+        return db.localeCompare(da);
+      });
+
+      for (const file of files) {
+        if (!file.Key) continue;
+        if (!file.Key.endsWith('.html')) continue; // process HTML only for structure
+
+        // Double-check file is within requested month
+        const dateMatch = file.Key.match(/(\d{4}-\d{2})-\d{2}\.html$/);
+        const fileMonth = dateMatch?.[1];
+        if (fileMonth !== month) continue;
+
+        // Use a very large limit per file; filtering happens inside
+        const perFileLimit = Number.MAX_SAFE_INTEGER;
+        const matched = await processSingleS3File(bucketName, file.Key, query, perFileLimit);
+        results.push(...matched);
+      }
+    }
+
+    return results;
+  } catch (err) {
+    console.error('S3 month-wide search error:', err);
     return [];
   }
 }
@@ -409,45 +492,48 @@ export async function GET(request: Request): Promise<NextResponse> {
       }, { status: 400 });
     }
 
-    const { query, limit, page, month } = params;
-    const skip = (page - 1) * limit; // Calculate skip for pagination
-    
-    // Step 3: Search in MongoDB (today's logs)
-    const databaseResults = await searchMongoDB(query, limit, skip, month);
+    const { query, limit, page, fromDate, toDate, user, source } = params;
+    const skip = (page - 1) * limit;
 
-    // Determine how many more results we need from S3
-    const remainingNeeded = Math.max(0, limit - databaseResults.length);
-    
-    // Step 4: Search in S3 (historical logs) only for the remaining needed
-    const s3Results = remainingNeeded > 0
-      ? await searchS3Files(query, remainingNeeded, month)
-      : [];
-    
-    // Step 5: Combine and process results
-    const { finalResults, counts } = combineAndSortResults(
-      { databaseResults, s3Results },
-      limit
+    // Fetch from DB and/or S3 based on source
+    let dbResults: any[] = [];
+    let s3Results: any[] = [];
+    if (!source || source === 'both' || source === 'database') {
+      dbResults = await searchMongoDB(query, 10000, 0, fromDate, toDate, user); // fetch all, filter later
+    }
+    if (!source || source === 'both' || source === 's3') {
+      s3Results = await searchS3Files(query, 10000, fromDate, toDate, user); // fetch all, filter later
+    }
+    // Tag sources
+    dbResults = dbResults.map((log) => ({ ...log, source: 'database' }));
+    s3Results = s3Results.map((log) => ({ ...log, source: 's3' }));
+    // Combine and sort
+    let combined = [...dbResults, ...s3Results].sort((a, b) => {
+      const ta = a.timestamp || '';
+      const tb = b.timestamp || '';
+      return tb.localeCompare(ta);
+    });
+    const total = combined.length;
+    const pageSlice = combined.slice(skip, skip + limit);
+    const pagination = getPaginationMeta(page, limit, total);
+    const counts = {
+      database: dbResults.length,
+      s3: s3Results.length,
+      total,
+    };
+    return NextResponse.json(
+      {
+        success: true,
+        message: 'Search completed successfully',
+        query,
+        timeMs: Date.now() - startTime,
+        data: pageSlice,
+        counts,
+        pagination,
+        filters: { fromDate, toDate, user, source },
+      },
+      { status: 200 }
     );
-
-    // Calculate total results available for pagination
-    // For accurate pagination, we'd need to count total results, but
-    // since we're dealing with S3 files, we'll estimate based on what we have
-    const totalEstimate = counts.total * Math.max(1, page);
-    const pagination = getPaginationMeta(page, limit, totalEstimate);
-
-    // Step 6: Return successful response with pagination metadata
-    return NextResponse.json({
-      success: true,
-      message: "Search completed successfully",
-      query,
-      timeMs: Date.now() - startTime,
-      data: finalResults,
-      counts,
-      pagination,
-      filters: {
-        month: month || null
-      }
-    }, { status: 200 });
 
   } catch (error) {
     console.error("Search API error:", error);
