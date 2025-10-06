@@ -87,8 +87,13 @@ async function authenticateRequest(): Promise<void> {
     throw new AuthError("Unauthorized");
   }
 
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error("JWT_SECRET environment variable is not defined");
+  }
+
   try {
-    jwt.verify(tokenCookie.value, process.env.JWT_SECRET!);
+    jwt.verify(tokenCookie.value, secret);
   } catch (error) {
     throw new AuthError("Unauthorized");
   }
