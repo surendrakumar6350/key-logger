@@ -27,7 +27,7 @@ export function combineAndSortResults(
   const counts = {
     database: results.databaseResults.length,
     s3: results.s3Results.length,
-    total: finalResults.length,
+    total: results.databaseResults.length + results.s3Results.length,
   };
   return { finalResults, counts };
 }
