@@ -4,10 +4,10 @@ import { LogEntry } from '../types';
 
 interface LogDetailProps {
   log: LogEntry | null;
-  isLoading: boolean;
+  isLoading?: boolean;
 }
 
-export default function LogDetail({ log, isLoading }: LogDetailProps) {
+export default function LogDetail({ log, isLoading = false }: LogDetailProps) {
   if (isLoading) {
     return (
       <div className="w-full h-full flex items-center justify-center">

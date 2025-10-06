@@ -4,9 +4,12 @@ import { useState, useEffect, useRef } from "react";
 import LogItem from "./LogItem";
 import LogDetail from "./LogDetail";
 import SearchBar from "./SearchBar";
+import DatePicker from "./DatePicker";
 import { useLogData } from "@/hooks/useLogData";
 
 export default function LogViewer() {
+  const [initialDate, setInitialDate] = useState('');
+  
   const {
     filteredLogs,
     selectedLog,
@@ -21,7 +24,15 @@ export default function LogViewer() {
     setPage,
     limit,
     setLimit,
-  } = useLogData({ page: 1, limit: 20, refreshInterval: 10000 });
+    date,
+    setDate,
+    dataSource,
+  } = useLogData({ 
+    page: 1, 
+    limit: 20, 
+    date: initialDate,
+    refreshInterval: 10000 
+  });
 
   // Two refs: one for desktop, one for mobile
   const desktopListRef = useRef<HTMLDivElement | null>(null);
@@ -49,13 +60,7 @@ export default function LogViewer() {
     scrollToTop(); // ✅ always scroll back to top
   };
 
-  useEffect(() => {
-    const isMobile = window.innerWidth < 768;
-
-    if (!isMobile && filteredLogs.length > 0 && !selectedLog) {
-      setSelectedLog(filteredLogs[0]); // ✅ auto-select only on desktop
-    }
-  }, [filteredLogs, selectedLog, setSelectedLog]);
+  // Removed eager auto-select to prevent selection/UI race conditions
 
   if (!mounted) return null;
 
@@ -73,12 +78,19 @@ export default function LogViewer() {
 
       <div className="hidden md:flex w-1/3 border-l border-gray-800 bg-gray-900 flex-col">
         <div className="p-4 border-b border-gray-800">
-          <SearchBar
-            searchQuery={searchQuery}
-            setSearchQuery={setSearchQuery}
-            isLoading={isLoading}
-            onRefresh={refreshLogs}
+          <DatePicker 
+            onDateChange={(newDate) => setDate(newDate)}
+            currentDate={date}
+            isS3Source={dataSource === 's3'}
           />
+          <div className="mt-4">
+            <SearchBar
+              searchQuery={searchQuery}
+              setSearchQuery={setSearchQuery}
+              isLoading={isLoading}
+              onSearch={refreshLogs}
+            />
+          </div>
           <div className="flex justify-between items-center mt-2">
             <h2 className="text-lg font-medium text-white">Activity Logs</h2>
             <span className="text-sm text-gray-400">
@@ -95,9 +107,12 @@ export default function LogViewer() {
           {filteredLogs.length > 0 ? (
             filteredLogs.map((log) => (
               <LogItem
-                key={log._id}
+                key={log._id || `${log.timestamp}-${log.ip}`}
                 log={log}
-                isSelected={selectedLog?._id === log._id}
+                isSelected={selectedLog ? 
+                  ((selectedLog as any)._id && log._id ? (selectedLog as any)._id === log._id : 
+                  (selectedLog as any).timestamp === log.timestamp && (selectedLog as any).ip === log.ip)
+                  : false}
                 onClick={() => setSelectedLog(log)}
               />
             ))
@@ -151,12 +166,19 @@ export default function LogViewer() {
           <>
             {/* Logs List */}
             <div className="p-4 border-b border-gray-800">
-              <SearchBar
-                searchQuery={searchQuery}
-                setSearchQuery={setSearchQuery}
-                isLoading={isLoading}
-                onRefresh={refreshLogs}
+              <DatePicker 
+                onDateChange={(newDate) => setDate(newDate)}
+                currentDate={date}
+                isS3Source={dataSource === 's3'}
               />
+              <div className="mt-4">
+                <SearchBar
+                  searchQuery={searchQuery}
+                  setSearchQuery={setSearchQuery}
+                  isLoading={isLoading}
+                  onSearch={refreshLogs}
+                />
+              </div>
               <div className="flex justify-between items-center mt-2">
                 <h2 className="text-lg font-medium text-white">Activity Logs</h2>
                 <span className="text-sm text-gray-400">
@@ -173,10 +195,12 @@ export default function LogViewer() {
               {filteredLogs.length > 0 ? (
                 filteredLogs.map((log) => (
                   <LogItem
-                    key={log._id}
+                    key={log._id || `${log.timestamp}-${log.ip}`}
                     log={log}
-                    //@ts-ignore
-                    isSelected={selectedLog?._id === log._id}
+                    isSelected={selectedLog ? 
+                      ((selectedLog as any)._id && log._id ? (selectedLog as any)._id === log._id : 
+                      (selectedLog as any).timestamp === log.timestamp && (selectedLog as any).ip === log.ip)
+                      : false}
                     onClick={() => setSelectedLog(log)}
                   />
                 ))

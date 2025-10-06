@@ -1,0 +1,37 @@
+name: Test Project
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: |
+          cd pull-logs
+          npm install
+
+      - name: Create .env file
+        run: |
+          echo "DB=${{ secrets.DB }}" >> pull-logs/.env
+          echo "JWT_SECRET=${{ secrets.JWT_SECRET }}" >> pull-logs/.env
+          echo "NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}" >> pull-logs/.env
+          echo "USERNAME_US=${{ secrets.USERNAME_US }}" >> pull-logs/.env
+          echo "PASSWORD=${{ secrets.PASSWORD }}" >> pull-logs/.env
+          echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> pull-logs/.env
+          echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> pull-logs/.env
+          echo "AWS_REGION=${{ secrets.AWS_REGION }}" >> pull-logs/.env
+          echo "S3_BUCKET_NAME=${{ secrets.S3_BUCKET_NAME }}" >> pull-logs/.env
+
+      - name: Build project
+        run: cd pull-logs && npm run build

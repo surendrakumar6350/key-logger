@@ -37,7 +37,7 @@ const LogTable: React.FC<LogTableProps> = ({ logs }) => {
             </tr>
           ) : (
             logs.map((log) => (
-              <tr key={log._id} className="hover:bg-gray-50">
+              <tr key={log._id || `${log.timestamp}-${log.ip}`} className="hover:bg-gray-50">
                 <td className="px-6 py-4 whitespace-nowrap">
                   <div className="flex items-center">
                     <div className="h-8 w-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center mr-3">
